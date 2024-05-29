@@ -1,18 +1,18 @@
 //#![feature(type_alias_impl_trait)]
- /// # The Xcruciating Markup Language
- /// We're going to write a parser for a simplified version of XML. It looks like this:
- ///    <parent-element>
- ///        <single-element attribute="value">text</single-element>
- ///    </parent-element>
- /// XML elements open with the symbol `<` and an identifier consisting of a letter followed by any
- /// number of letters, numbers and `-`. This is followed by some whitespace, and an optional list
- /// of attribute pairs: another identifier as defined previously, followed by a `=` and a double
- /// quoted string. Finally, there is either a closing `/>` to signify a single element with no
- /// children, or a `>` to signify there is a sequence of child elements following, and finally a
- /// closing tag starting with `</`, followed by an identifier which must match the opening tag, and
- /// a final `>`.
+/// # The Xcruciating Markup Language
+/// We're going to write a parser for a simplified version of XML. It looks like this:
+///    <parent-element>
+///        <single-element attribute="value">text</single-element>
+///    </parent-element>
+/// XML elements open with the symbol `<` and an identifier consisting of a letter followed by any
+/// number of letters, numbers and `-`. This is followed by some whitespace, and an optional list
+/// of attribute pairs: another identifier as defined previously, followed by a `=` and a double
+/// quoted string. Finally, there is either a closing `/>` to signify a single element with no
+/// children, or a `>` to signify there is a sequence of child elements following, and finally a
+/// closing tag starting with `</`, followed by an identifier which must match the opening tag, and
+/// a final `>`.
 
- #[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Element {
     name: String,
     attributes: Vec<(String, String)>,
@@ -35,6 +35,26 @@ struct Element {
 //
 // // So let's go ahead and implement `Parser` on any type that implements the `Fn(&str) -> Result<(&str, Element), &str>`.
 // impl <Element: Fn(&str) -> Result<(&str, Element), &str>> Parser<Element> for Element {}
+
+/// A generic type alias for a parser function return type.
+type ParseResult<'a, Output> = Result<(&'a str, Output), &'a str>;
+
+trait Parser<'a, Output> {
+    fn parse(&self, input: &'a str) -> ParseResult<'a, Output>;
+}
+
+/// Implement the Parser trait for any function that matches the signature of a parser.
+/// This way, not only can we pass around the same functions we've been passing around so far as
+/// parsers fully implementing the `Parser` trait, we also open up the possibility to use other
+/// kinds of types as parsers.
+impl<'a, F, Output> Parser<'a, Output> for F
+where
+    F: Fn(&'a str) -> ParseResult<'a, Output>,
+{
+    fn parse(&self, input: &'a str) -> ParseResult<'a, Output> {
+        self(input)
+    }
+}
 
 /// A simple parser which just looks at the first character in the string and decides whether or not
 /// it's the letter a.
@@ -76,21 +96,23 @@ fn match_identifier(input: &str) -> Result<(&str, String), &str> {
     Ok((&input[next_index..], matched))
 }
 
-
 /// # Combinators
 /// The next step is to write another parser builder function, one that takes two parsers as input
 /// and returns a new parser which parses both of them in order. In other words a `parser combinator`,
 /// because it combines two parsers into one.
-fn pair<P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Fn(&str) -> Result<(&str, (R1, R2)), &str>
+fn pair<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, (R1, R2)>
 where
-    P1: Fn(&str) -> Result<(&str, R1), &str>,
-    P2: Fn(&str) -> Result<(&str, R2), &str>,
+    P1: Parser<'a, R1>,
+    P2: Parser<'a, R2>,
 {
-    move |input| parser1(input).and_then(|(next_input, result1)| {
-        parser2(next_input).map(|(last_input, result2)| (last_input, (result1, result2)))
-    })
+    move |input| {
+        parser1.parse(input).and_then(|(next_input, result1)| {
+            parser2
+                .parse(next_input)
+                .map(|(last_input, result2)| (last_input, (result1, result2)))
+        })
+    }
 }
-
 
 /// # Enter the functor
 /// This combinator has one purpose: to change the type of the result.
@@ -98,19 +120,21 @@ where
 /// If you've got a thing with a type `A` in it, and you have a `map` function available that you can
 /// pass a function from `A` to `B` into to turn it into the same kind of thing but with type `B`
 /// instead, that's a functor.
-fn map<P, F, A, B>(parser: P, map_fn: F) -> impl Fn(&str) -> Result<(&str, B), &str>
+fn map<'a, P, F, A, B>(parser: P, map_fn: F) -> impl Parser<'a, B>
 where
-    P: Fn(&str) -> Result<(&str, A), &str>,
+    P: Parser<'a, A>,
     F: Fn(A) -> B,
 {
-    move |input| parser(input).map(|(next_input, result)| (next_input, map_fn(result)))
+    move |input| {
+        parser
+            .parse(input)
+            .map(|(next_input, result)| (next_input, map_fn(result)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        match_literal, match_identifier, pair,
-    };
+    use super::{match_identifier, match_literal, pair, Parser};
 
     #[test]
     fn literal_parser() {
@@ -121,22 +145,37 @@ mod tests {
 
         let parse_joe_1 = match_literal("Hello Joe!");
         assert_eq!(Ok(("", ())), parse_joe_1("Hello Joe!"));
-        assert_eq!(Ok((" Hello Robert!", ())), parse_joe_1("Hello Joe! Hello Robert!"));
+        assert_eq!(
+            Ok((" Hello Robert!", ())),
+            parse_joe_1("Hello Joe! Hello Robert!")
+        );
         assert_eq!(Err("Hello Mike!"), parse_joe_1("Hello Mike!"));
     }
 
     #[test]
     fn identifier_parser() {
-        assert_eq!(Ok(("", "i-am-an-identifier".to_string())), match_identifier("i-am-an-identifier"));
-        assert_eq!(Ok((" entirely an identifier", "not".to_string())), match_identifier("not entirely an identifier"));
-        assert_eq!(Err("!not at all an identifier"), match_identifier("!not at all an identifier"));
+        assert_eq!(
+            Ok(("", "i-am-an-identifier".to_string())),
+            match_identifier("i-am-an-identifier")
+        );
+        assert_eq!(
+            Ok((" entirely an identifier", "not".to_string())),
+            match_identifier("not entirely an identifier")
+        );
+        assert_eq!(
+            Err("!not at all an identifier"),
+            match_identifier("!not at all an identifier")
+        );
     }
 
     #[test]
     fn pair_combinator() {
         let tag_opener = pair(match_literal("<"), match_identifier);
-        assert_eq!(Ok(("/>", ((), "my-first-element".to_string()))), tag_opener("<my-first-element/>"));
-        assert_eq!(Err("oops"), tag_opener("oops"));
-        assert_eq!(Err("!oops"), tag_opener("!oops"));
+        assert_eq!(
+            Ok(("/>", ((), "my-first-element".to_string()))),
+            tag_opener.parse("<my-first-element/>")
+        );
+        assert_eq!(Err("oops"), tag_opener.parse("oops"));
+        assert_eq!(Err("!oops"), tag_opener.parse("!oops"));
     }
 }
