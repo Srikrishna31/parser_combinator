@@ -47,25 +47,58 @@ fn the_letter_a(input: &str) -> Result<(&str, ()), &str> {
 
 /// # A Parser builder
 /// A function that produces a parser for a static string of any length, not just a single character.
+/// This building block helps us to parse `<`, `>`, `</`, `/>`, `=` etc.
 fn match_literal<'a>(expected: &'a str) -> impl Fn(&str) -> Result<(&str, ()), &str> + 'a {
-    move |input| match input.get(0..expected.len()) {
-        Some(next) if next == expected => Ok((&input[expected.len()..], ())),
+    move |input| match input.starts_with(expected) {
+        true => Ok((&input[expected.len()..], ())),
         _ => Err(input),
     }
 }
 
+/// # A Parser for something less specific
+/// The rule for the element name identifier is - one alphabetical character, followed by zero or more
+/// of either an alphabetical character, a number, or a hyphen.
+fn match_identifier(input: &str) -> Result<(&str, String), &str> {
+    let mut matched = String::new();
+    let mut chars = input.chars();
+
+    match chars.next() {
+        Some(c) if c.is_alphabetic() => matched.push(c),
+        _ => return Err(input),
+    }
+
+    chars
+        .take_while(|c| c.is_alphanumeric() || *c == '-')
+        .for_each(|c| matched.push(c));
+
+    let next_index = matched.len();
+
+    Ok((&input[next_index..], matched))
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{
+        match_literal, match_identifier,
+    };
+
     #[test]
     fn literal_parser() {
-        let parse_joe = super::match_literal("Joe");
+        let parse_joe = match_literal("Joe");
         assert_eq!(parse_joe("Joe"), Ok(("", ())));
         assert_eq!(parse_joe("Joe!"), Ok(("!", ())));
         assert_eq!(parse_joe("Not Joe"), Err("Not Joe"));
 
-        let parse_joe_1 = super::match_literal("Hello Joe!");
+        let parse_joe_1 = match_literal("Hello Joe!");
         assert_eq!(Ok(("", ())), parse_joe_1("Hello Joe!"));
         assert_eq!(Ok((" Hello Robert!", ())), parse_joe_1("Hello Joe! Hello Robert!"));
         assert_eq!(Err("Hello Mike!"), parse_joe_1("Hello Mike!"));
+    }
+
+    #[test]
+    fn identifier_parser() {
+        assert_eq!(Ok(("", "i-am-an-identifier".to_string())), match_identifier("i-am-an-identifier"));
+        assert_eq!(Ok((" entirely an identifier", "not".to_string())), match_identifier("not entirely an identifier"));
+        assert_eq!(Err("!not at all an identifier"), match_identifier("!not at all an identifier"));
     }
 }
