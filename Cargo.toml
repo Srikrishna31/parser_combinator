@@ -1,0 +1,5 @@
+[package]
+name = "parser_combinator"
+version = "0.1.0"
+authors = ["Krishna Addepalli <krishna.addepalli@kpit.com>"]
+edition = "2021"
