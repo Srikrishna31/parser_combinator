@@ -92,6 +92,20 @@ where
 }
 
 
+/// # Enter the functor
+/// This combinator has one purpose: to change the type of the result.
+/// This pattern is what's called a "functor" in Haskell and its mathematical sibling, category theory.
+/// If you've got a thing with a type `A` in it, and you have a `map` function available that you can
+/// pass a function from `A` to `B` into to turn it into the same kind of thing but with type `B`
+/// instead, that's a functor.
+fn map<P, F, A, B>(parser: P, map_fn: F) -> impl Fn(&str) -> Result<(&str, B), &str>
+where
+    P: Fn(&str) -> Result<(&str, A), &str>,
+    F: Fn(A) -> B,
+{
+    move |input| parser(input).map(|(next_input, result)| (next_input, map_fn(result)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
