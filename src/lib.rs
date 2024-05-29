@@ -58,7 +58,7 @@ where
 
 /// A simple parser which just looks at the first character in the string and decides whether or not
 /// it's the letter a.
-fn the_letter_a(input: &str) -> Result<(&str, ()), &str> {
+fn the_letter_a(input: &str) -> ParseResult<()> {
     match input.chars().next() {
         Some('a') => Ok((&input['a'.len_utf8()..], ())),
         _ => Err(input),
@@ -68,8 +68,8 @@ fn the_letter_a(input: &str) -> Result<(&str, ()), &str> {
 /// # A Parser builder
 /// A function that produces a parser for a static string of any length, not just a single character.
 /// This building block helps us to parse `<`, `>`, `</`, `/>`, `=` etc.
-fn match_literal<'a>(expected: &'a str) -> impl Fn(&str) -> Result<(&str, ()), &str> + 'a {
-    move |input| match input.starts_with(expected) {
+fn match_literal<'a>(expected: &'a str) -> impl Parser<'a, ()> {
+    move |input: &'a str| match input.starts_with(expected) {
         true => Ok((&input[expected.len()..], ())),
         _ => Err(input),
     }
@@ -78,7 +78,7 @@ fn match_literal<'a>(expected: &'a str) -> impl Fn(&str) -> Result<(&str, ()), &
 /// # A Parser for something less specific
 /// The rule for the element name identifier is - one alphabetical character, followed by zero or more
 /// of either an alphabetical character, a number, or a hyphen.
-fn match_identifier(input: &str) -> Result<(&str, String), &str> {
+fn match_identifier(input: &str) -> ParseResult<String> {
     let mut matched = String::new();
     let mut chars = input.chars();
 
@@ -132,24 +132,47 @@ where
     }
 }
 
+/// # Left and Right
+/// We are going to have to deal with result types like: `((), String)`, a lot. Some of our parsers
+/// only match patterns in the input without producing values, and so their outputs can be safely
+/// ignored. To accommodate this pattern, we're going to use out `pair` combinator to write two
+/// other combinators: `left` which discards the result of the first parser and only returns the
+/// second, and it's opposite number, `right`, which discards the second result and only returns the
+/// first.
+fn left<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, R1>
+where
+    P1: Parser<'a, R1>,
+    P2: Parser<'a, R2>,
+{
+    map(pair(parser1, parser2), |(left, _right)| left)
+}
+
+fn right<'a, P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Parser<'a, R2>
+where
+    P1: Parser<'a, R1>,
+    P2: Parser<'a, R2>,
+{
+    map(pair(parser1, parser2), |(_left, right)| right)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{match_identifier, match_literal, pair, Parser};
+    use super::*;
 
     #[test]
     fn literal_parser() {
         let parse_joe = match_literal("Joe");
-        assert_eq!(parse_joe("Joe"), Ok(("", ())));
-        assert_eq!(parse_joe("Joe!"), Ok(("!", ())));
-        assert_eq!(parse_joe("Not Joe"), Err("Not Joe"));
+        assert_eq!(parse_joe.parse("Joe"), Ok(("", ())));
+        assert_eq!(parse_joe.parse("Joe!"), Ok(("!", ())));
+        assert_eq!(parse_joe.parse("Not Joe"), Err("Not Joe"));
 
         let parse_joe_1 = match_literal("Hello Joe!");
-        assert_eq!(Ok(("", ())), parse_joe_1("Hello Joe!"));
+        assert_eq!(Ok(("", ())), parse_joe_1.parse("Hello Joe!"));
         assert_eq!(
             Ok((" Hello Robert!", ())),
-            parse_joe_1("Hello Joe! Hello Robert!")
+            parse_joe_1.parse("Hello Joe! Hello Robert!")
         );
-        assert_eq!(Err("Hello Mike!"), parse_joe_1("Hello Mike!"));
+        assert_eq!(Err("Hello Mike!"), parse_joe_1.parse("Hello Mike!"));
     }
 
     #[test]
@@ -173,6 +196,18 @@ mod tests {
         let tag_opener = pair(match_literal("<"), match_identifier);
         assert_eq!(
             Ok(("/>", ((), "my-first-element".to_string()))),
+            tag_opener.parse("<my-first-element/>")
+        );
+        assert_eq!(Err("oops"), tag_opener.parse("oops"));
+        assert_eq!(Err("!oops"), tag_opener.parse("!oops"));
+    }
+
+    #[test]
+    fn right_combinator() {
+        let tag_opener = right(match_literal("<"), match_identifier);
+
+        assert_eq!(
+            Ok(("/>", "my-first-element".to_string())),
             tag_opener.parse("<my-first-element/>")
         );
         assert_eq!(Err("oops"), tag_opener.parse("oops"));
