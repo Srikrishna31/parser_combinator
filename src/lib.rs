@@ -76,10 +76,26 @@ fn match_identifier(input: &str) -> Result<(&str, String), &str> {
     Ok((&input[next_index..], matched))
 }
 
+
+/// # Combinators
+/// The next step is to write another parser builder function, one that takes two parsers as input
+/// and returns a new parser which parses both of them in order. In other words a `parser combinator`,
+/// because it combines two parsers into one.
+fn pair<P1, P2, R1, R2>(parser1: P1, parser2: P2) -> impl Fn(&str) -> Result<(&str, (R1, R2)), &str>
+where
+    P1: Fn(&str) -> Result<(&str, R1), &str>,
+    P2: Fn(&str) -> Result<(&str, R2), &str>,
+{
+    move |input| parser1(input).and_then(|(next_input, result1)| {
+        parser2(next_input).map(|(last_input, result2)| (last_input, (result1, result2)))
+    })
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::{
-        match_literal, match_identifier,
+        match_literal, match_identifier, pair,
     };
 
     #[test]
@@ -100,5 +116,13 @@ mod tests {
         assert_eq!(Ok(("", "i-am-an-identifier".to_string())), match_identifier("i-am-an-identifier"));
         assert_eq!(Ok((" entirely an identifier", "not".to_string())), match_identifier("not entirely an identifier"));
         assert_eq!(Err("!not at all an identifier"), match_identifier("!not at all an identifier"));
+    }
+
+    #[test]
+    fn pair_combinator() {
+        let tag_opener = pair(match_literal("<"), match_identifier);
+        assert_eq!(Ok(("/>", ((), "my-first-element".to_string()))), tag_opener("<my-first-element/>"));
+        assert_eq!(Err("oops"), tag_opener("oops"));
+        assert_eq!(Err("!oops"), tag_opener("!oops"));
     }
 }
