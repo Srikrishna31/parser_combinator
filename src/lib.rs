@@ -155,6 +155,109 @@ where
     map(pair(parser1, parser2), |(_left, right)| right)
 }
 
+
+/// # One or More
+fn one_or_more<'a ,P, A>(parser: P) -> impl Parser<'a, Vec<A>>
+where
+    P: Parser<'a, A>,
+{
+    move |mut input| {
+        // TODO: Figure out a way to use the zero_or_more combinator to simplify this
+        let mut result = Vec::new();
+
+        if let Ok((next_input, first_item)) = parser.parse(input) {
+            input = next_input;
+            result.push(first_item);
+        } else {
+            return Err(input);
+        }
+
+        // TODO: Use take_while to simplify this
+        while let Ok((next_input, next_item)) = parser.parse(input) {
+            input = next_input;
+            result.push(next_item);
+        }
+
+        Ok((input, result))
+        // let first_item = if let Ok((next_input, first_item)) = parser.parse(input) {
+        //     input = next_input;
+        //     first_item
+        // } else {
+        //     return Err(input);
+        // };
+
+
+       // let mut result =  zero_or_more(parser).parse(input);
+       //
+       //  result.map(|(next_input, mut items)| {
+       //      items.insert(0, first_item);
+       //      (next_input, items)
+       //  })
+    }
+}
+
+fn zero_or_more<'a, P, A>(parser: P) -> impl Parser<'a, Vec<A>>
+where
+    P: Parser<'a, A>,
+{
+    move |mut input| {
+        let mut result = Vec::new();
+
+        // TODO: Use take_while to simplify this
+        while let Ok((next_input, next_item)) = parser.parse(input) {
+            input = next_input;
+            result.push(next_item);
+        }
+
+        Ok((input, result))
+    }
+}
+
+/// # Any character
+/// This parser returns a single `char` as long as there is one left in the input.
+fn any_char(input: &str) -> ParseResult<char> {
+    match input.chars().next() {
+        Some(c) => Ok((&input[c.len_utf8()..], c)),
+        _ => Err(input),
+    }
+}
+
+/// # Pred Combinator
+/// This combinator is a bit different from the others. It takes a parser and a predicate function.
+/// If the parser succeeds, the predicate is called with the result of the parse. If the predicate
+/// returns true, the parse succeeds and the result is returned. If the predicate returns false, the
+/// parse fails and the input is returned unchanged.
+fn pred<'a, P, A, F>(parser: P, predicate: F) -> impl Parser<'a, A>
+where
+    P: Parser<'a, A>,
+    F: Fn(&A) -> bool,
+{
+    move |input| {
+        if let Ok((next_input, value)) = parser.parse(input) {
+            if predicate(&value) {
+                return Ok((next_input, value));
+            }
+        }
+
+        Err(input)
+    }
+}
+
+fn whitespace_char<'a>() -> impl Parser<'a, char> {
+    pred(any_char, |c| c.is_whitespace())
+}
+
+/// # Space0 and Space1
+/// space1 is a parser that matches one or more whitespace characters, and space0 is a parser that
+/// matches zero or more whitespace characters.
+fn space1<'a>() -> impl Parser<'a, Vec<char>> {
+    one_or_more(whitespace_char())
+}
+
+fn space0<'a>() -> impl Parser<'a, Vec<char>> {
+    zero_or_more(whitespace_char())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,5 +315,28 @@ mod tests {
         );
         assert_eq!(Err("oops"), tag_opener.parse("oops"));
         assert_eq!(Err("!oops"), tag_opener.parse("!oops"));
+    }
+
+    #[test]
+    fn one_or_more_combinator() {
+        let parser = one_or_more(match_literal("ha"));
+        assert_eq!(Ok(("", vec![(), (), ()])), parser.parse("hahaha"));
+        assert_eq!(Err("ahah"), parser.parse("ahah"));
+        assert_eq!(Err(""), parser.parse(""));
+    }
+
+    #[test]
+    fn zero_or_more_combinator() {
+        let parser = zero_or_more(match_literal("ha"));
+        assert_eq!(Ok(("", vec![(), (), ()])), parser.parse("hahaha"));
+        assert_eq!(Ok(("ahah", vec![])), parser.parse("ahah"));
+        assert_eq!(Ok(("", vec![])), parser.parse(""));
+    }
+
+    #[test]
+    fn predicate_combinator() {
+        let parser = pred(any_char, |c| *c == 'o');
+        assert_eq!(Ok(("mg", 'o')), parser.parse("omg"));
+        assert_eq!(Err("lol"), parser.parse("lol"));
     }
 }
