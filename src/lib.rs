@@ -258,6 +258,30 @@ fn space0<'a>() -> impl Parser<'a, Vec<char>> {
     zero_or_more(whitespace_char())
 }
 
+/// # Quoted String
+/// This parser parses a quoted string, which is defined more precisely as follows:
+/// * one quote
+/// * zero or more characters that are not a quote
+/// * followed by another quote
+fn quoted_string<'a>() -> impl Parser<'a, String> {
+    map(
+        right(
+            match_literal("\""),
+            left(zero_or_more(pred(any_char, |c| *c != '"')),
+                 match_literal("\"")),
+        ),
+        |chars| chars.into_iter().collect(),
+    )
+}
+
+fn attribute_pair<'a>() -> impl Parser<'a, (String, String)> {
+    pair(match_identifier, right(match_literal("="), quoted_string()))
+}
+
+fn attributes<'a>() -> impl Parser<'a, Vec<(String, String)>> {
+    zero_or_more(right(space1(), attribute_pair()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,5 +362,24 @@ mod tests {
         let parser = pred(any_char, |c| *c == 'o');
         assert_eq!(Ok(("mg", 'o')), parser.parse("omg"));
         assert_eq!(Err("lol"), parser.parse("lol"));
+    }
+
+    #[test]
+    fn quoted_string_parser() {
+        assert_eq!(
+            Ok(("", "I am a quoted string".to_string())),
+            quoted_string().parse("\"I am a quoted string\"")
+        );
+    }
+
+    #[test]
+    fn attribute_parser() {
+        assert_eq!(
+            Ok(("", vec![
+                ("one".to_string(), "1".to_string()),
+                ("two".to_string(), "2".to_string())
+            ])),
+            attributes().parse(" one=\"1\" two=\"2\"")
+        );
     }
 }
