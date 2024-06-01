@@ -76,6 +76,26 @@ trait Parser<'a, Output> {
     {
         BoxedParser::new(one_or_more(self))
     }
+
+    fn either<P>(self, other: P) -> BoxedParser<'a, Output>
+    where
+        Self: Sized + 'a,
+        Output: 'a,
+        P: Parser<'a, Output> + 'a,
+    {
+        BoxedParser::new(either(self, other))
+    }
+
+    fn and_then<F, NextParser, NewOutput>(self, f: F) -> BoxedParser<'a, NewOutput>
+    where
+        Self: Sized + 'a,
+        Output: 'a,
+        NewOutput: 'a,
+        NextParser: Parser<'a, NewOutput> + 'a,
+        F: Fn(Output) -> NextParser + 'a,
+    {
+        BoxedParser::new(and_then(self, f))
+    }
 }
 
 /// Implement the Parser trait for any function that matches the signature of a parser.
@@ -347,6 +367,74 @@ impl<'a, Output> Parser<'a, Output> for BoxedParser<'a, Output> {
         self.parser.parse(input)
     }
 }
+
+
+fn open_element<'a>() -> impl Parser<'a, Element> {
+    left(element_start(), match_literal(">")).map(|(name, attributes)| Element {
+        name,
+        attributes,
+        children: vec![],
+    })
+}
+
+
+/// # Either
+/// This parser combinator tries two parsers in order: if the first parser succeeds, we're done, we
+/// return its result and that's it. If it fails, instead of returning an error, we try the second
+/// parser on the same input. If that succeeds, great, and if it doesn't, we return the error too,
+/// as that means both our parsers have failed, and that's an overall failure.
+fn either<'a, P1, P2, A>(parser1: P1, parser2: P2) -> impl Parser<'a, A>
+where
+    P1: Parser<'a, A>,
+    P2: Parser<'a, A>,
+{
+    move |input| parser1.parse(input).or_else(|_| parser2.parse(input))
+}
+
+fn element<'a>() -> impl Parser<'a, Element> {
+    whitespace_wrap(either(single_element(), parent_element()))
+    // whitespace_char()
+    //     .zero_or_more()
+    //     .either(single_element())
+    //     .either(open_element())
+}
+
+fn close_element<'a>(expected_name: String) -> impl Parser<'a, String> {
+    right(match_literal("</"), left(match_identifier, match_literal(">")))
+        .pred(move |name| name == &expected_name)
+}
+
+fn whitespace_wrap<'a, P, A>(parser: P) -> impl Parser<'a, A>
+where
+    P: Parser<'a, A>,
+{
+    right(space0(), left(parser, space0()))
+}
+
+/// # And-then
+/// This takes a parser, and a function that takes the result of a parser and returns a new parser,
+/// which we'll then run. It's a bit like `pair`, except instead of just collecting both results in
+/// a tuple, we thread them through a function.
+fn and_then<'a, P, F, A, B, NextP>(parser:P, f: F) -> impl Parser<'a, B>
+where
+    P: Parser<'a, A>,
+    NextP: Parser<'a, B>,
+    F: Fn(A) -> NextP,
+{
+    move |input| parser.parse(input).and_then(|(next_input, result)| f(result).parse(next_input))
+}
+
+
+fn parent_element<'a>() -> impl Parser<'a, Element> {
+    open_element().and_then(|e1| {
+        left(zero_or_more(element()), close_element(e1.name.clone())).map(move |children| {
+            let mut e1 = e1.clone();
+            e1.children = children;
+            e1
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,5 +552,48 @@ mod tests {
             )),
             single_element().parse("<div class=\"float\"/>")
         );
+    }
+
+    #[test]
+    fn xml_parser() {
+        let doc = r#"
+            <top label="Top">
+                <semi-bottom label="Bottom"/>
+                <middle>
+                    <bottom label="Another bottom"/>
+                </middle>
+            </top>"#;
+        let parsed_doc = Element {
+            name: "top".to_string(),
+            attributes: vec![("label".to_string(), "Top".to_string())],
+            children: vec![
+                Element {
+                    name: "semi-bottom".to_string(),
+                    attributes: vec![("label".to_string(), "Bottom".to_string())],
+                    children: vec![],
+                },
+                Element {
+                    name: "middle".to_string(),
+                    attributes: vec![],
+                    children: vec![
+                        Element {
+                            name: "bottom".to_string(),
+                            attributes: vec![("label".to_string(), "Another bottom".to_string())],
+                            children: vec![]
+                        }
+                    ]
+                }
+            ],
+        };
+        assert_eq!(Ok(("", parsed_doc)), element().parse(doc));
+    }
+
+    #[test]
+    fn mismatched_closing_tag() {
+        let doc=r#"
+            <top>
+                <bottom/>
+            </middle>"#;
+        assert_eq!(Err("</middle>"), element().parse(doc));
     }
 }
