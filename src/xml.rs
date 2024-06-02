@@ -17,19 +17,10 @@ use crate::core::{
 /// a final `>`.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Element {
-    name: String,
-    attributes: Vec<(String, String)>,
-    children: Vec<Element>,
-}
-
-/// A simple parser which just looks at the first character in the string and decides whether or not
-/// it's the letter a.
-fn the_letter_a(input: &str) -> ParseResult<()> {
-    match input.chars().next() {
-        Some('a') => Ok((&input['a'.len_utf8()..], ())),
-        _ => Err(input),
-    }
+pub struct Element {
+    pub name: String,
+    pub attributes: Vec<(String, String)>,
+    pub children: Vec<Element>,
 }
 
 /// # A Parser for something less specific
@@ -81,7 +72,7 @@ fn open_element<'a>() -> impl Parser<'a, Element> {
     })
 }
 
-fn element<'a>() -> impl Parser<'a, Element> {
+pub fn element<'a>() -> impl Parser<'a, Element> {
     whitespace_wrap(either(single_element(), parent_element()))
     // whitespace_char()
     //     .zero_or_more()
@@ -119,22 +110,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn literal_parser() {
-        let parse_joe = match_literal("Joe");
-        assert_eq!(parse_joe.parse("Joe"), Ok(("", ())));
-        assert_eq!(parse_joe.parse("Joe!"), Ok(("!", ())));
-        assert_eq!(parse_joe.parse("Not Joe"), Err("Not Joe"));
-
-        let parse_joe_1 = match_literal("Hello Joe!");
-        assert_eq!(Ok(("", ())), parse_joe_1.parse("Hello Joe!"));
-        assert_eq!(
-            Ok((" Hello Robert!", ())),
-            parse_joe_1.parse("Hello Joe! Hello Robert!")
-        );
-        assert_eq!(Err("Hello Mike!"), parse_joe_1.parse("Hello Mike!"));
-    }
-
-    #[test]
     fn identifier_parser() {
         assert_eq!(
             Ok(("", "i-am-an-identifier".to_string())),
@@ -152,7 +127,7 @@ mod tests {
 
     #[test]
     fn pair_combinator() {
-        let tag_opener = pair(match_literal("<"), match_identifier);
+        let tag_opener = pair(match_literal("<"), crate::xml::match_identifier);
         assert_eq!(
             Ok(("/>", ((), "my-first-element".to_string()))),
             tag_opener.parse("<my-first-element/>")

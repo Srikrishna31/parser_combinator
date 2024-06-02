@@ -77,6 +77,15 @@ pub trait Parser<'a, Output> {
     }
 }
 
+/// A simple parser which just looks at the first character in the string and decides whether or not
+/// it's the letter a.
+fn the_letter_a(input: &str) -> ParseResult<()> {
+    match input.chars().next() {
+        Some('a') => Ok((&input['a'.len_utf8()..], ())),
+        _ => Err(input),
+    }
+}
+
 /// Implement the Parser trait for any function that matches the signature of a parser.
 /// This way, not only can we pass around the same functions we've been passing around so far as
 /// parsers fully implementing the `Parser` trait, we also open up the possibility to use other
@@ -330,6 +339,22 @@ impl<'a, Output> Parser<'a, Output> for BoxedParser<'a, Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_parser() {
+        let parse_joe = match_literal("Joe");
+        assert_eq!(parse_joe.parse("Joe"), Ok(("", ())));
+        assert_eq!(parse_joe.parse("Joe!"), Ok(("!", ())));
+        assert_eq!(parse_joe.parse("Not Joe"), Err("Not Joe"));
+
+        let parse_joe_1 = match_literal("Hello Joe!");
+        assert_eq!(Ok(("", ())), parse_joe_1.parse("Hello Joe!"));
+        assert_eq!(
+            Ok((" Hello Robert!", ())),
+            parse_joe_1.parse("Hello Joe! Hello Robert!")
+        );
+        assert_eq!(Err("Hello Mike!"), parse_joe_1.parse("Hello Mike!"));
+    }
 
     #[test]
     fn one_or_more_combinator() {
