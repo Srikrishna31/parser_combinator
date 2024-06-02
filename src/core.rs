@@ -79,12 +79,12 @@ pub trait Parser<'a, Output> {
 
 /// A simple parser which just looks at the first character in the string and decides whether or not
 /// it's the letter a.
-fn the_letter_a(input: &str) -> ParseResult<()> {
-    match input.chars().next() {
-        Some('a') => Ok((&input['a'.len_utf8()..], ())),
-        _ => Err(input),
-    }
-}
+// fn the_letter_a(input: &str) -> ParseResult<()> {
+//     match input.chars().next() {
+//         Some('a') => Ok((&input['a'.len_utf8()..], ())),
+//         _ => Err(input),
+//     }
+// }
 
 /// Implement the Parser trait for any function that matches the signature of a parser.
 /// This way, not only can we pass around the same functions we've been passing around so far as
